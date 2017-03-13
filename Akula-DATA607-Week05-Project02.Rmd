@@ -1,0 +1,491 @@
+---
+title: "DATA607-Week05-Project02"
+author: "Pavan Akula"
+date: "March 7, 2017"
+output: html_document
+---
+
+The goal of this assignment is to prepare different datasets^1^ (databases) for downstream analysis work. Following are the 3 datasets that will be used for this project. Dataset sources was identified by 
+
+  **1. World Development Indicators (WDI) - _Kyle Gilde_**
+  
+  **2. IRS's Statistics of Income (SOI) - _Pavan Akula_**
+  
+  **3. United States Census Bureau - Imports of Crude Oil - _Nnaemezue Obi-eyisi_**
+
+Libraries used for the project
+
+```{r, echo=T, message=F}
+#install.packages("xlsx")
+library(xlsx)     # used for loading files with extension xlsx and xls
+library(utils)    # loading csv files
+library(tidyr)    # formating data 
+library(dplyr)    # subseting, changing data layout
+library(stringr)  # regular expression and data manupilation
+library(ggplot2)  # graphs generation
+library(knitr)    # report display, table format
+library(readr)    # reading text files data
+```
+
+###  1. World Development Indicators (WDI)
+  
+The World Bank maintains [*World Development Indicators (WDI) database.*](http://data.worldbank.org/data-catalog/world-development-indicators) Collection of development indicators are compiled from officially-recognized international sources by World Bank. It presents the most current and accurate global development data available, and includes national, regional and global estimates. Database contains various indicator topics including Agriculture & Rural Development, Aid Effectiveness, Climate Change, Economy & Growth, Education, Energy & Mining, Environment, External Debt, Financial Sector, Gender, Health, Infrastructure, Labor & Social Protection, Poverty, Private Sector, Public Sector, Science & Technology, Social Development, Trade and Urban Development. 
+
+Data is classified by World Bank into economies, regions, income groups and lending groups. Database has data from year 1960 to current. Update frequency of the database is quarterly. Complete database and data dictionary is available in Zip file format at World Bank website http://data.worldbank.org/data-catalog/world-development-indicators.
+
+More information about data classification and collection can be found at
+
+  a. Country classification: https://datahelpdesk.worldbank.org/knowledgebase/articles/378834-how-does-the-world-bank-classify-countries
+  b. Data Compilation Methodology: https://datahelpdesk.worldbank.org/knowledgebase/articles/201203
+  c. Country and Lending Groups: https://datahelpdesk.worldbank.org/knowledgebase/articles/906519-world-bank-country-and-lending-groups
+
+Using WDI database, development indicators for last 10 years that fall under **_Financial Sector: Access_** topic will be analysed for G20 nations. To be more specific only one indicator **_Average transaction cost of sending and receving remittances from or to a specific country_** will be analysis.
+
+```{r, echo=T, message=F}
+# Load World Indicators from WDI_Series.csv
+# This file contains information about each indicator
+# There are about 17 indicators that fall under Financial Sector: Access
+wd <- getwd()
+wdi.indicator.data <- read.csv(paste(wd , "\\WDI_Series.csv", sep = ""), stringsAsFactors = FALSE, header = TRUE)
+wdi.indicator.finsec.access <- wdi.indicator.data %>% 
+  filter(Topic == "Financial Sector: Access") %>% 
+  select(Indicator.Name)
+
+# G20 nations
+#nations <- c("Argentina","Australia","Brazil","Canada","China","France","Germany","India","Indonesia","Italy","Japan","Mexico","Russian Federation","Saudi Arabia","South Africa","South Korea","Turkey","United Kingdom","United States","Austria","Belgium","Bulgaria","Croatia","Cyprus","Czech Republic","Denmark","Estonia","Finland","Greece","Hungary","Ireland","Latvia","Lithuania","Luxembourg","Malta","Netherlands","Poland","Portugal","Romania","Slovak Republic","Slovenia","Spain","Sweden")
+
+nations <- c("Argentina","Australia","Brazil","Canada","China","France","Germany","India","Indonesia","Italy","Japan","Mexico","Russia","Saudi Arabia","South Africa","South Korea","Turkey","United Kingdom","United States","European Union")
+
+g20.nations <- data.frame(nations, stringsAsFactors = FALSE)
+
+# Assign unique id's to nations
+g20.nations <- g20.nations %>% 
+  mutate(id = row_number())
+
+# Load World Development Indicators (WDI) database
+# Database has 383328 observations with 61 variables
+wdi.raw.data <- read.csv(paste(wd, "\\WDI_Data.csv", sep = ""), stringsAsFactors = FALSE, header = TRUE)
+
+#str(wdi.raw.data)
+# Format data, some rows have [ts] and [w2] at the end of indicator description 
+wdi.raw.data$Indicator.Name <- gsub("\\[ts\\]", "" ,wdi.raw.data$Indicator.Name)
+wdi.raw.data$Indicator.Name <- gsub("\\[w2\\]", "" ,wdi.raw.data$Indicator.Name)
+wdi.raw.data$Indicator.Name <- str_trim(wdi.raw.data$Indicator.Name)
+wdi.raw.data$Country.Name <- str_replace(wdi.raw.data$Country.Name, "Russian Federation", "Russia")
+wdi.raw.data$Country.Name <- str_replace(wdi.raw.data$Country.Name, "Korea, Rep\\.", "South Korea")
+
+# Filter data for last 10 years excluding 2016
+# Get data only for G20 nations
+wdi.g20.nations.raw <- wdi.raw.data %>% 
+  inner_join(wdi.indicator.finsec.access, by = "Indicator.Name") %>%
+  inner_join(g20.nations, by = c("Country.Name" = "nations")) %>%
+  select (id, Country.Name, Country.Code, Indicator.Name, X2006:X2015)
+
+#unique(wdi.g20.nations.raw$Indicator.Name)
+#unique(wdi.g20.nations.raw$Country.Name)
+# Tidy the data set
+
+wdi.g20.nations.tidy.data <- wdi.g20.nations.raw %>%
+  gather(Year, value = Measure, X2006:X2015, na.rm = FALSE)
+
+wdi.g20.nations.tidy.data$Measure = ifelse(is.na(wdi.g20.nations.tidy.data$Measure), 0, round(wdi.g20.nations.tidy.data$Measure, 2))
+
+wdi.g20.nations.tidy.data$Year <- gsub("[[:alpha:]]", "" ,wdi.g20.nations.tidy.data$Year)
+
+# Format rows data
+unique(wdi.g20.nations.tidy.data$Indicator.Name)
+
+wdi.g20.nations.tidy.data$Indicator.Name <- str_replace(wdi.g20.nations.tidy.data$Indicator.Name, "Average transaction cost of sending remittances to a specific country \\(\\%\\)", "Sending")
+
+wdi.g20.nations.tidy.data$Indicator.Name <- str_replace(wdi.g20.nations.tidy.data$Indicator.Name, "Average transaction cost of sending remittances from a specific country \\(\\%\\)", "Receving")
+
+# Get Average transaction cost consumer paid for sending and/or receving remittances to/from a specific country in 2015
+remit.to.from <- wdi.g20.nations.tidy.data %>% 
+  filter(Indicator.Name %in% c("Sending", "Receving")  & Year == 2015) %>% 
+  select (Country.Name,id, Measure, Indicator.Name) %>% 
+  spread(Indicator.Name, Measure)
+
+# Rearrange the data
+remit.to.from <- remit.to.from %>% arrange(id)
+
+# Keep order of countries
+remit.to.from <- transform(remit.to.from, Country.Name=factor(Country.Name,levels=unique(Country.Name)))
+```
+
+Information shows cost paid by the consumer for sending and/or receiving money in year 2015 
+
+```{r results='asis', echo=F}
+remit.to.from %>% 
+  select (Country.Name, Sending, Receving) %>% 
+  kable(digits = 2, col.names = c("Country", "Sending", "Receving"), format='pandoc', caption = "Avg. cost paid by consumers for remittances in 2015 (%)")
+```
+
+Graphical representation.
+
+```{r , echo=T}
+# Displays Average transaction cost of sending remittances from a specific country (%) in 2015
+
+ggplot(data=remit.to.from, aes(x=`Country.Name`, y=Sending)) + geom_bar(width=.9,stat="identity",position = "dodge") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x="Country Name", y="Percentage", title = "Avg. cost paid by consumer for sending money to other countries in 2015 (%)") + geom_text(aes(label=Sending), vjust=0, color="black") 
+
+```
+
+```{r , echo=T}
+# Displays Average transaction cost of receving remittances from a specific country (%) in 2015
+
+ggplot(data=remit.to.from, aes(x=`Country.Name`, y=Receving)) + geom_bar(width=.9,stat="identity",position = "dodge") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x="Country Name", y="Percentage", title = "Avg. cost paid by consumer for receving money to other countries in 2015 (%)") + geom_text(aes(label=Receving), vjust=0, color="black")  
+```
+
+```{r, echo=T}
+# Tidy the data and get countries that charge consumers for sending and receving remittances
+remit.to.from.charge <- remit.to.from %>% 
+  #filter(Sending>0 & Receving >0) %>% 
+  select (`Country.Name`,Sending,Receving) %>% 
+  gather(Type, value = Measure, -Country.Name,  na.rm = FALSE)
+
+ggplot(remit.to.from.charge, aes(x = Country.Name,y = Measure)) + 
+geom_bar(aes(fill = Type), position = "dodge", stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x="Country Name", y="Percentage", title = "Avg. cost paid by consumer for remittances in 2015 (%)") 
+```
+
+Conclusion:
+
+1. Consumers residing in Argentina and European Union did not pay extra cost for sending and receiving remittances in 2015.
+
+2. Consumers residing in South Africa and Brazil paid extra cost while sending and receiving remittances in 2015.
+
+3. Consumers residing in Australia, Brazil, Canada, France, Germany, Italy, Japan, Russia, Saudi Arabia, South Africa, South Korea, United Kingdom and United States only paid extra cost while sending remittances in 2015.
+
+4. Consumers residing in Brazil, China, India, Mexico, South Africa and Turkey only paid extra cost while receiving remittances in 2015.
+
+5. Consumers residing South Africa paid highest cost for sending remittances, while Consumers residing in China paid highest cost for receiving remittances in 2015.
+
+
+###  2. IRS's Statistics of Income (SOI)
+
+Internal Revenue Service (IRS) maintains [*Statistics of Income (SOI) - County Data.*](https://www.irs.gov/uac/soi-tax-stats-county-data) SOI bases its county income data on the addresses reported on individual income tax returns filed with the IRS. Database includes:
+
+  - Number of returns, which approximates the number of households
+  - Number of personal exemptions, which approximates the population
+  - Adjusted gross income
+  - Wages and salaries
+  - Dividends before exclusion
+  - Interest received
+
+More information about data classification and collection can be found at
+
+  a. Data information: https://www.irs.gov/uac/soi-tax-stats-county-data
+  b. Data collection and processing: https://www.irs.gov/uac/soi-tax-stats-purpose-and-function-of-statistics-of-income-soi-program
+  c. Data Dictionary and Users Guide: https://www.irs.gov/uac/soi-tax-stats-county-income-data-users-guide-and-record-layouts
+  
+Using SOI Tax Stats - County Database 2014, metrics for California and Texas will be analysed. For the scope of the project returns will be analysis based on **_Adjusted gross income_** and **_Filing status_** for both states.
+
+```{r, echo=T, message=F}
+wd <- getwd()
+# Data Dictionary
+soi.data.dic <- read.xlsx2(paste(wd, "\\SOI_Data_Dictionary_County2014.xlsx", sep = ""), sheetName = "Sheet1", startRow=2, endRow = 138, startColumn = 1, endColumn = 6, as.data.frame = T, header = T, colClasses = "character", stringsAsFactors = FALSE)
+
+# Get agi range
+agi_range <- soi.data.dic %>% 
+  filter(TYPE == "") %>% 
+  select (VALUE.LINE.REFERENCE) %>% 
+  separate(VALUE.LINE.REFERENCE, c("agi_id","agi_desc"), sep = "\\s=\\s")
+
+agi_range$agi_id <- as.numeric(as.character(agi_range$agi_id))
+
+# Load Statistics of Income (SOI) - County Data from 14incyallagi.csv
+# This file contains county level tax filing details and also has state level rollup
+# There are about 25536 observations and 128 variables that covers all states
+# California (CA) and Texas (TX) states data will be used for this project
+
+soi.raw.data <- read.csv(paste(wd , "\\14incyallagi.csv", sep = ""), stringsAsFactors = FALSE, header = TRUE)
+
+# agi_stub = Adjusted gross income (1-Under $1, 2-$1 under $10,000, 3-$10,000 under $25,000,4-$25,000 under $50,000,5-$50,000 under $75,000,6-$75,000 under $100,000,7-$100,000 under $200,000,8-$200,000 or more
+# numberOfTIReturns = Number of returns with taxable income
+# tIAmount = Taxable income amount
+# numberOfTPReturns = Number of returns with total tax payments
+# tPAmount = Total tax payments amount
+
+# Tidy the data and get required data
+# Missing values, since numberOfSingleReturns + numberOfJointReturns + numberOfHOHReturns != numberOfReturns
+# add otherReturns
+soi.ca.tx.data <- soi.raw.data %>% 
+  filter(STATE %in% c("CA","TX") & COUNTYFIPS == 0) %>% 
+  mutate(otherReturns = (N1 - (mars1+MARS2+MARS4))) %>% 
+  select(agi_stub,state = COUNTYNAME, numberOfReturns = N1, numberOfSingleReturns = mars1, numberOfJointReturns = MARS2, numberOfHOHReturns = MARS4, otherReturns, numberOfTIReturns = N04800, tIAmount = A04800, numberOfTPReturns = N10600, tPAmount = A10600) %>% 
+  inner_join(agi_range, by = c("agi_stub" = "agi_id"))
+
+# Calculate percentages
+soi.ca.tx.data %<>%
+  group_by(state) %>% 
+  summarise(totalReturns = sum(numberOfReturns)) %>%
+  select (state,totalReturns) %>% 
+  inner_join(soi.ca.tx.data, by = "state")
+
+soi.ca.tx.data <- mutate(soi.ca.tx.data, "SingleReturns" = round(numberOfSingleReturns*100/totalReturns,2))
+soi.ca.tx.data <- mutate(soi.ca.tx.data, "JointReturns" = round(numberOfJointReturns*100/totalReturns,2))
+soi.ca.tx.data <- mutate(soi.ca.tx.data, "HOHReturns" = round(numberOfHOHReturns*100/totalReturns,2))
+soi.ca.tx.data <- mutate(soi.ca.tx.data, "OtherReturns" = round(otherReturns*100/totalReturns,2))
+soi.ca.tx.data <- mutate(soi.ca.tx.data, "Total" = SingleReturns+JointReturns+HOHReturns+OtherReturns)
+
+# Generate report to compare percentage of tax returns files
+soi.ca.tx.data %>%
+  select (state, agi_stub, agi_desc, Total) %>% 
+  arrange(agi_stub) %>% 
+  spread(state, Total) %>% 
+  select (agi_desc, California, Texas) %>% 
+  kable(digits = 2, col.names = c("Adjusted Gross Income", "California(%)", "Texas(%)"), format='pandoc', caption = "Percentage of Tax Returns filed based on Adjusted Gross Income for year 2014")
+```
+
+Graphical representation.
+
+```{r, echo=T}
+# Rearrange the data
+soi.ca.tx.data <- arrange(soi.ca.tx.data, agi_stub, agi_desc)
+soi.ca.tx.data <- transform(soi.ca.tx.data, agi_desc=factor(agi_desc,levels=unique(agi_desc)))
+
+# Generate graph to compare taxes returns files based on Adjusted Gross Income
+ggplot(soi.ca.tx.data, aes(x = agi_desc,y = Total)) + 
+geom_bar(aes(fill = state), position = "dodge", stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x="Adjusted Gross Income", y="Percentage", title = "Percentage of Tax Returns filed based on Adjusted Gross Income for year 2014")
+```
+
+```{r , echo=T}
+# Generate report based on filing status
+ca.tx.c1 <- soi.ca.tx.data %>%
+  group_by(state) %>% 
+  summarise(Single = sum(SingleReturns), Joint = sum(JointReturns), "Head Of Household" = sum(HOHReturns), Other=sum(OtherReturns)) %>%
+  select (state, Single, Joint, `Head Of Household`, Other) %>% 
+  gather(ReturnType, "n", Single, Joint, `Head Of Household`, Other) %>% 
+  select(state, ReturnType, Total=n) %>% 
+  spread(state, Total)
+
+# Arrange data
+ca.tx.c1 <- arrange(ca.tx.c1, desc(California))
+ca.tx.c1 <- mutate(ca.tx.c1, id = row_number())
+ca.tx.c1 <- transform(ca.tx.c1, id=factor(id,levels=unique(id)))
+ca.tx.c1 %>% 
+  select(ReturnType, California, Texas) %>% 
+kable(digits = 2, col.names = c("Return Type", "California(%)", "Texas(%)"), format='pandoc', caption = "Percentage of Tax Returns filed based on Status for year 2014")
+```
+
+Graphical representation.
+
+```{r, echo=T}
+# Get the dataset
+ca.tx.c2 <-
+soi.ca.tx.data %>%
+  group_by(state) %>% 
+  summarise(Single = sum(SingleReturns), Joint = sum(JointReturns), "Head Of Household" = sum(HOHReturns), Other=sum(OtherReturns)) %>%
+  select (state, Single, Joint, `Head Of Household`, Other) %>% 
+  gather(ReturnType, "n", Single, Joint, `Head Of Household`, Other) %>% 
+  select(state, ReturnType, Total=n)
+
+# Returns filing order
+filing <- c("Single","Joint","Head Of Household","Other")
+id <- c(1,2,3,4)
+filing.order <- data.frame(filing, id, stringsAsFactors = FALSE)
+
+ca.tx.c2 <- ca.tx.c2 %>% 
+  inner_join(filing.order, by = c("ReturnType" = "filing"))
+
+ca.tx.c2 <- arrange(ca.tx.c2, state, id)
+ca.tx.c2 <- transform(ca.tx.c2, ReturnType=factor(ReturnType,levels=unique(ReturnType)))
+
+
+# Generate graph to compare taxes returns files based on Adjusted Gross Income
+ggplot(ca.tx.c2, aes(x = ReturnType,y = Total)) + 
+geom_bar(aes(fill = state), position = "dodge", stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x="Filing Status", y="Percentage", title = "Percentage of Tax Returns filed based on Filing Status for year 2014")
+```
+
+Conclusion:
+
+1. Texas has slightly more percentage of population that earns between $1 under $50,000.
+
+2. California and Texas has approxmimately same percentage of population that earns between $50,000 under $75,000.
+
+3. California has slightly more percentage of population that earns above $75,000.
+
+###  3. United States Census Bureau - Imports of Crude Oil
+
+The United States Census Bureau is a principal agency of the U.S. Federal Statistical System, responsible for producing data about the American people and economy. Statistics of [*U.S. Imports of Crude Oil*](https://www.census.gov/foreign-trade/statistics/historical/index.html) is compiled with the help of U.S. Customs and Border Protection and the Bureau of Economic Analysis. Purpose of this database is to provide detailed statistics on goods and estimates of services entering the U.S. from foreign countries.
+
+More information about data and program can be found at
+
+  a. Program details: https://www.census.gov/foreign-trade/about/index.html
+  
+  b. Foreign Trade historical data: https://www.census.gov/foreign-trade/statistics/historical/index.html
+  
+  c. U.S. Imports of Crude Oil: https://www.census.gov/foreign-trade/statistics/historical/petr.txt
+
+Using the U.S. Imports of Crude Oil database, metrics for yearly imports of crude oil and costs will be analysed. Since years 2017 and 2018 does not have complete data, years will not be used for analysis.
+
+```{r , echo=TRUE}
+# Get local directory and load the file
+localDir <- getwd()
+
+# Skip top 24 lines as it contains header info
+crude.oil.text <- read_lines(paste(str_trim(localDir),"//petr.txt",sep=""),skip = 24)
+
+# Remove Spaces and replace with pipe(|)
+pattern = "\\s+"
+replacement = "|"
+crude.oil.text <- gsub(pattern = pattern, replacement = replacement, crude.oil.text)
+
+# Remove unnecessary data
+pattern = "Jan\\."
+crude.noneed.data <- crude.oil.text[str_detect(crude.oil.text, pattern = pattern)]
+crude.oil.text <- crude.oil.text [! crude.oil.text %in% crude.noneed.data]
+
+# Create data frame and add id column
+# Split the data into 15 columns
+crude.oil.data <- data.frame(unlist(str_split_fixed(crude.oil.text, "\\|", 15)), stringsAsFactors = F)
+crude.oil.data <- mutate(crude.oil.data, id = row_number())
+
+# Since data is text format and yearly data is stored side-by-side, convert it to single table
+# File has about 46 yearly data sets, 2017 and 2018 data set is not used for analysis
+start = 1
+end = 13
+crude.oil.tidy.data <- crude.oil.data %>% 
+    filter(id == 0) %>% 
+    select(X2:X8)
+    
+for (i in 1:22)
+{
+  # Get first set
+  temp1 <- crude.oil.data %>% 
+    filter(id >= start & id <= end) %>% 
+    select(id, X1:X8)
+  
+  year <- crude.oil.data %>% 
+    filter (id == start) %>% 
+    select(X2)
+  
+  # Get year
+  temp1$X1[temp1$X1 == ""] <- year
+  
+  # Get second set of data which is same side-by-side
+  temp2 <- crude.oil.data %>% 
+    filter(id >= start & id <= end) %>% 
+    select(id, X1, X2=X9, X3=X10, X4=X11, X5=X12, X6=X13, X7=X14, X8=X15)
+  
+  # Get year
+  year <- crude.oil.data %>% 
+    filter (id == start) %>% 
+    select(X3)  
+  
+  temp2$X1[temp2$X1 == ""] <- year
+  
+  # Remove extra rows from temp data frames
+  temp1 <- temp1[-c(1), ]
+  temp2 <- temp2[-c(1), ]
+  
+  # Store data into tidy table
+  crude.oil.tidy.data <- bind_rows(crude.oil.tidy.data,temp1)
+  crude.oil.tidy.data <- bind_rows(crude.oil.tidy.data,temp2)
+
+  start = end + 1
+  end = end + 13
+}
+
+# Add new id column and remove un-used columns
+crude.oil.tidy.data$X1 <- as.numeric(unlist(crude.oil.tidy.data$X1))
+crude.oil.tidy.data <- arrange(crude.oil.tidy.data, X1,id) %>% mutate(seq = row_number())
+crude.oil.tidy.data$id <- NULL
+crude.oil.tidy.data$X4 <- NULL
+crude.oil.tidy.data$X6 <- NULL
+crude.oil.tidy.data$X7 <- NULL
+crude.oil.tidy.data$X8 <- NULL
+
+# Format data and replace missing values with zeros
+crude.oil.tidy.data$X3 <- as.numeric(ifelse(crude.oil.tidy.data$X3 == "N/A", "0",str_replace_all(crude.oil.tidy.data$X3,",","")))
+
+crude.oil.tidy.data$X5 <- as.numeric(ifelse(crude.oil.tidy.data$X5 == "N/A", "0",str_replace_all(crude.oil.tidy.data$X5,",","")))
+
+crude.oil.tidy.data <-  rename(crude.oil.tidy.data, Month = X2, Barrels = X3, Value = X5, Year = X1)
+
+# Summarise data
+crude.oil.yearly.data <- crude.oil.tidy.data %>% 
+  group_by(Year) %>% 
+  summarise(TotalBarrels = round(sum(Barrels)/10000,2), TotalValue = round(sum(Value)/10000,2), AverageBarrels = round(mean(Barrels)/10000,2), AverageValue = round(mean(Value)/10000,2))
+
+# Generate report
+crude.oil.yearly.data %>% 
+  select (Year, AverageBarrels) %>% 
+kable(digits = 2, col.names = c("Year", "Quantity (10 thousands of Barrels)"), format='pandoc', caption = "U.S. Yearly Average Imports of Crude Oil 1973 - 2016")
+
+# Graphical representation
+ggplot(data=crude.oil.yearly.data, aes(x=Year, y=AverageBarrels, group=1)) +
+    geom_line() +
+    geom_point() + labs(x="Year", y="Quantity (10 thousands of Barrels)", title = "U.S. Yearly Average Imports of Crude Oil 1973 - 2016")
+```
+
+```{r, echo=T}
+crude.oil.yearly.data %>% 
+  select (Year, AverageValue) %>% 
+kable(digits = 2, col.names = c("Year", "Value (10 thousands of Dollars)"), format='pandoc', caption = "U.S. Yearly Average Imports of Crude Oil 1973 - 2016")
+
+# Graphical representation
+ggplot(data=crude.oil.yearly.data, aes(x=Year, y=AverageValue, group=1)) +
+    geom_line() +
+    geom_point() + labs(x="Year", y="Value (10 thousands of Dollars)", title = "U.S. Yearly Average Imports of Crude Oil 1973 - 2016")
+```
+
+```{r, echo=T}
+# Generate data for seasons
+seasons <- c("Winter", "Winter", "Winter", "Spring", "Spring", "Spring", "Summer", "Summer", "Summer", "Fall", "Fall", "Fall")
+m <- c("December", "January", "February", "March","April", "May", "June", "July", "August", "September", "October", "November")
+id <- c(4,4,4,1,1,1,2,2,2,3,3,3)
+
+seasons.data <- data.frame(seasons, m, id)
+seasons.data$seasons <- as.character(seasons.data$seasons)
+seasons.data$m <- as.character(seasons.data$m)
+
+crude.oil.season.data <- crude.oil.tidy.data %>% 
+  filter(Year >= 2007) %>% 
+  inner_join(seasons.data, c("Month" = "m")) %>% 
+  group_by(Year,seasons,id) %>% 
+  summarise(TotalBarrels = round(sum(Barrels)/10000,2), TotalValue = round(sum(Value)/10000,2), AverageBarrels = round(mean(Barrels)/10000,2), AverageValue = round(mean(Value)/10000,2))
+
+# Rearrange the data
+crude.oil.season.data <- arrange(crude.oil.season.data, Year, id, seasons)
+crude.oil.season.data <- transform(crude.oil.season.data, seasons=factor(seasons,levels=unique(seasons)))
+
+crude.oil.season.data %>% 
+  arrange(Year, id) %>%
+  select (Year, seasons, TotalBarrels) %>% 
+kable(digits = 2, col.names = c("Year", "Season", "Quantity (10 thousands of Dollars)"), format='pandoc', caption = "U.S. Imports of Crude Oil per Season 2007 - 2016")
+
+ggplot(data=crude.oil.season.data, aes(x=Year, y=TotalBarrels, fill=seasons)) +
+    geom_bar(stat="identity") + labs(x="Year", y="Quantity (10 thousands of Barrels)", title = "U.S. Imports of Crude Oil per Season 2007 - 2016")
+```
+```{r, echo=T}
+crude.oil.season.data %>% 
+  arrange(Year, id) %>%
+  select (Year, seasons, TotalValue) %>% 
+kable(digits = 2, col.names = c("Year", "Season", "Value (10 thousands of Dollars)"), format='pandoc', caption = "U.S. Imports of Crude Oil per Season 2007 - 2016")
+
+ggplot(data=crude.oil.season.data, aes(x=Year, y=TotalValue, fill=seasons)) +
+    geom_bar(stat="identity") + labs(x="Year", y="Value (10 thousands of Dollars)", title = "U.S. Imports of Crude Oil per Season 2007 - 2016")
+```
+
+Conclusion:
+
+1. Import of crude oil incresed gradually over a period of time util 2005. Imports peaked between 2004 and 2006.
+
+2. Imports of crude oil started to fall gradually after year 2006. In 2015 imports where similar to 1994.
+
+3. Cost of crude oil imports increased sharply between 2000 and 2008.
+
+4. Cost of crude oil imports dropped sharply in 2009.
+
+5. Cost of crude oil imports increased sharply between 2010 and 2012.
+
+6. Cost of crude oil imports started to fall since 2012.
+
+7. General trend for last 10 year seasonly crude oil import shows declining.
+
+
+References:
+https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html
+https://github.com/rstudio/webinars/tree/master/05-Data-Wrangling-with-R-and-RStudio
+https://www.r-bloggers.com/importexport-data-to-and-from-xlsx-files/
+
+^1^: For the course of this project words dataset and database are interchangeable.
